@@ -27,7 +27,7 @@ pub struct JobResult {
 async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     // parse the cli arguments
     let matches = App::new("aem-eye")
-        .version("0.1.2")
+        .version("0.1.3")
         .author("Blake Jacobs <krypt0mux@gmail.com>")
         .about("really fas aem detection tool")
         .arg(
@@ -52,7 +52,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
             Arg::with_name("concurrency")
                 .short('c')
                 .long("concurrency")
-                .default_value("1000")
+                .default_value("100")
                 .takes_value(true)
                 .display_order(3)
                 .help("The amount of concurrent requests"),
@@ -88,8 +88,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     let concurrency = match matches.value_of("concurrency").unwrap().parse::<u32>() {
         Ok(n) => n,
         Err(_) => {
-            println!("{}", "could not parse concurrency, using default of 1000");
-            1000
+            println!("{}", "could not parse concurrency, using default of 100");
+            100
         }
     };
 
