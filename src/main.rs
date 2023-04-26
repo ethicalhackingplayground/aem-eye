@@ -9,7 +9,6 @@ use tokio::{
     fs::File,
     io::{AsyncBufReadExt, BufReader},
     runtime::Builder,
-    sync::mpsc,
     task,
 };
 
@@ -28,7 +27,7 @@ pub struct JobResult {
 async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     // parse the cli arguments
     let matches = App::new("aem-eye")
-        .version("0.5.3")
+        .version("0.1.2")
         .author("Blake Jacobs <krypt0mux@gmail.com>")
         .about("really fas aem detection tool")
         .arg(
@@ -37,6 +36,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                 .long("hosts")
                 .takes_value(true)
                 .required(true)
+                .display_order(1)
                 .help("the hosts you would like to test"),
         )
         .arg(
@@ -45,6 +45,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                 .long("rate")
                 .takes_value(true)
                 .default_value("1000")
+                .display_order(2)
                 .help("Maximum in-flight requests per second"),
         )
         .arg(
@@ -53,6 +54,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                 .long("concurrency")
                 .default_value("1000")
                 .takes_value(true)
+                .display_order(3)
                 .help("The amount of concurrent requests"),
         )
         .arg(
@@ -61,14 +63,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                 .long("timeout")
                 .default_value("3")
                 .takes_value(true)
+                .display_order(4)
                 .help("The delay between each request"),
         )
         .arg(
             Arg::with_name("workers")
                 .short('w')
                 .long("workers")
-                .default_value("10")
+                .default_value("1")
                 .takes_value(true)
+                .display_order(5)
                 .help("The amount of workers"),
         )
         .get_matches();
@@ -94,11 +98,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         None => 3,
     };
 
-    let mut w: usize = match matches.value_of("workers").unwrap().parse::<usize>() {
+    let w: usize = match matches.value_of("workers").unwrap().parse::<usize>() {
         Ok(w) => w,
         Err(_) => {
-            println!("{}", "could not parse workers, using default of 10");
-            10
+            println!("{}", "could not parse workers, using default of 1");
+            1
         }
     };
 
@@ -123,10 +127,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         hosts.push(host);
     }
 
-    if hosts.len() > w {
-        w = hosts.len() + 1000;
-    }
-
     let mut patterns = HashMap::new();
     patterns.insert(1, String::from(r#"href="\/content\/dam.*"#));
     patterns.insert(2, String::from(r#"href="\/etc.clientlibs.*"#));
@@ -140,7 +140,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 
     // job channels
     let (job_tx, job_rx) = spmc::channel::<Job>();
-    let (result_tx, _result_rx) = mpsc::channel::<JobResult>(w);
 
     rt.spawn(async move { send_url(job_tx, hosts, patterns, rate).await });
 
@@ -150,13 +149,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     // process the jobs for scanning.
     for _ in 0..concurrency {
         let jrx = job_rx.clone();
-        let jtx: mpsc::Sender<JobResult> = result_tx.clone();
         workers.push(task::spawn(async move {
             //  run the detector
-            run_detector(jrx, jtx, timeout).await
+            run_detector(jrx, timeout).await
         }));
     }
-
     let _: Vec<_> = workers.collect().await;
     rt.shutdown_background();
 
@@ -174,24 +171,20 @@ async fn send_url(
 
     // send the jobs
     for host in ip_strs.iter() {
-        let parsed_url = match reqwest::Url::parse(host) {
-            Ok(parsed_url) => parsed_url,
-            Err(_) => continue,
-        };
+        lim.until_ready().await;
         let msg = Job {
-            ip_str: Some(parsed_url.to_string().clone()),
+            ip_str: Some(host.to_string().clone()),
             patterns: Some(patterns.clone()),
         };
         if let Err(_) = tx.send(msg) {
             continue;
         }
-        lim.until_ready().await;
     }
     Ok(())
 }
 
 // this function will test perform the aem detection
-pub async fn run_detector(rx: spmc::Receiver<Job>, tx: mpsc::Sender<JobResult>, timeout: usize) {
+pub async fn run_detector(rx: spmc::Receiver<Job>, timeout: usize) {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         reqwest::header::USER_AGENT,
@@ -243,14 +236,6 @@ pub async fn run_detector(rx: spmc::Receiver<Job>, tx: mpsc::Sender<JobResult>, 
                     println!("{}", job_host);
                     break;
                 }
-            }
-
-            // send the result message through the channel to the workers.
-            let result_msg = JobResult {
-                data: result.to_owned(),
-            };
-            if let Err(_) = tx.send(result_msg).await {
-                continue;
             }
         }
     }
