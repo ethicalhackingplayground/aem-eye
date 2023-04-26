@@ -1,5 +1,9 @@
 [package]
 name = "aem-eye"
+authors = ["zoid", "<krypt0mux@gmail.com>"]
+description = "a very fast aem detection tool."
+license = "MIT"
+repository = "https://github.com/ethicalhackingplayground/aem-eye"
 version = "0.1.0"
 edition = "2021"
 
