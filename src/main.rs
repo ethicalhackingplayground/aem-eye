@@ -16,7 +16,7 @@ use tokio::{
 #[derive(Clone, Debug)]
 pub struct Job {
     ip_str: Option<String>,
-    patterns: Option<HashMap<String, String>>,
+    patterns: Option<HashMap<i32, String>>,
 }
 
 #[derive(Clone, Debug)]
@@ -57,8 +57,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         )
         .arg(
             Arg::with_name("timeout")
-                .long("t")
-                .default_value("10")
+                .short('t')
+                .long("timeout")
+                .default_value("3")
                 .takes_value(true)
                 .help("The delay between each request"),
         )
@@ -90,10 +91,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 
     let timeout = match matches.get_one::<String>("timeout").map(|s| s.to_string()) {
         Some(timeout) => timeout.parse::<usize>().unwrap(),
-        None => 10,
+        None => 3,
     };
 
-    let w: usize = match matches.value_of("workers").unwrap().parse::<usize>() {
+    let mut w: usize = match matches.value_of("workers").unwrap().parse::<usize>() {
         Ok(w) => w,
         Err(_) => {
             println!("{}", "could not parse workers, using default of 10");
@@ -122,6 +123,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         hosts.push(host);
     }
 
+    if hosts.len() > w {
+        w = hosts.len() + 1000;
+    }
+
+    let mut patterns = HashMap::new();
+    patterns.insert(1, String::from(r#"href="\/content\/dam.*"#));
+    patterns.insert(2, String::from(r#"href="\/etc.clientlibs.*"#));
+
     // Set up a worker pool with the number of threads specified from the arguments
     let rt = Builder::new_multi_thread()
         .enable_all()
@@ -133,15 +142,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     let (job_tx, job_rx) = spmc::channel::<Job>();
     let (result_tx, _result_rx) = mpsc::channel::<JobResult>(w);
 
-    let mut patterns = HashMap::new();
-    patterns.insert(
-        String::from("http_resp"),
-        String::from(r#"href="\/content\/dam.*"#),
-    );
-    patterns.insert(
-        String::from("http_resp"),
-        String::from(r#"href="\/etc.clientlibs.*"#),
-    );
     rt.spawn(async move { send_url(job_tx, hosts, patterns, rate).await });
 
     // process the jobs
@@ -158,7 +158,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     }
 
     let _: Vec<_> = workers.collect().await;
-
     rt.shutdown_background();
 
     Ok(())
@@ -167,7 +166,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 async fn send_url(
     mut tx: spmc::Sender<Job>,
     ip_strs: Vec<String>,
-    patterns: HashMap<String, String>,
+    patterns: HashMap<i32, String>,
     rate: u32,
 ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     //set rate limit
@@ -175,8 +174,12 @@ async fn send_url(
 
     // send the jobs
     for host in ip_strs.iter() {
+        let parsed_url = match reqwest::Url::parse(host) {
+            Ok(parsed_url) => parsed_url,
+            Err(_) => continue,
+        };
         let msg = Job {
-            ip_str: Some(host.clone()),
+            ip_str: Some(parsed_url.to_string().clone()),
             patterns: Some(patterns.clone()),
         };
         if let Err(_) = tx.send(msg) {
@@ -188,11 +191,7 @@ async fn send_url(
 }
 
 // this function will test perform the aem detection
-pub async fn run_detector(
-    rx: spmc::Receiver<Job>,
-    tx: mpsc::Sender<JobResult>,
-    timeout: usize,
-) -> JobResult {
+pub async fn run_detector(rx: spmc::Receiver<Job>, tx: mpsc::Sender<JobResult>, timeout: usize) {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         reqwest::header::USER_AGENT,
@@ -214,10 +213,8 @@ pub async fn run_detector(
     while let Ok(job) = rx.recv() {
         let job_host = job.ip_str.unwrap();
         let job_patterns = job.patterns.unwrap();
-
         for pattern in job_patterns {
             let job_host_new = job_host.clone();
-            let job_host_result = job_host_new.clone();
             let get = client.get(job_host_new);
             let req = match get.build() {
                 Ok(req) => req,
@@ -233,12 +230,16 @@ pub async fn run_detector(
             };
             let body = match resp.text().await {
                 Ok(body) => body,
-                Err(_) => continue,
+                Err(_) => {
+                    continue;
+                }
             };
 
+            let mut result = String::from("");
             let re = Regex::new(&pattern.1).unwrap();
             for cap in re.captures_iter(&body) {
                 if cap.len() > 0 {
+                    result.push_str(&job_host);
                     println!("{}", job_host);
                     break;
                 }
@@ -246,16 +247,11 @@ pub async fn run_detector(
 
             // send the result message through the channel to the workers.
             let result_msg = JobResult {
-                data: job_host_result.to_owned(),
+                data: result.to_owned(),
             };
-            let result_job = result_msg.clone();
             if let Err(_) = tx.send(result_msg).await {
                 continue;
             }
-            return result_job;
         }
     }
-    return JobResult {
-        data: "".to_string(),
-    };
 }
