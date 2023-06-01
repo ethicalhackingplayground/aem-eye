@@ -28,7 +28,7 @@ pub struct JobResult {
 async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     // parse the cli arguments
     let matches = App::new("aem-eye")
-        .version("0.1.5")
+        .version("0.1.6")
         .author("Blake Jacobs <krypt0mux@gmail.com>")
         .about("really fast aem detection tool")
         .arg(
