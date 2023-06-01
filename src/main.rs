@@ -30,7 +30,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     let matches = App::new("aem-eye")
         .version("0.1.5")
         .author("Blake Jacobs <krypt0mux@gmail.com>")
-        .about("really fas aem detection tool")
+        .about("really fast aem detection tool")
         .arg(
             Arg::with_name("rate")
                 .short('r')
