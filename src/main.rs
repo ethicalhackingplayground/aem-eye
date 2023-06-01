@@ -28,7 +28,7 @@ pub struct JobResult {
 async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     // parse the cli arguments
     let matches = App::new("aem-eye")
-        .version("0.1.3")
+        .version("0.1.5")
         .author("Blake Jacobs <krypt0mux@gmail.com>")
         .about("really fas aem detection tool")
         .arg(
@@ -99,8 +99,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     };
 
     let mut patterns = HashMap::new();
-    patterns.insert(1, String::from(r#"href="\/content\/dam.*"#));
-    patterns.insert(2, String::from(r#"href="\/etc.clientlibs.*"#));
+    patterns.insert(1, String::from(r"/content/dam.*"));
+    patterns.insert(2, String::from(r"/etc.clientlibs.*"));
 
     // Set up a worker pool with the number of threads specified from the arguments
     let rt = Builder::new_multi_thread()

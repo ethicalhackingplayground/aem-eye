@@ -4,7 +4,7 @@ authors = ["zoid", "<krypt0mux@gmail.com>"]
 description = "a very fast aem detection tool."
 license = "MIT"
 repository = "https://github.com/ethicalhackingplayground/aem-eye"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
