@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, process::exit, time::Duration};
+use std::{collections::HashMap, error::Error, time::Duration};
 
 use clap::{App, Arg};
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -6,11 +6,12 @@ use governor::{Quota, RateLimiter};
 use regex::Regex;
 use reqwest::redirect;
 use tokio::{
-    fs::File,
-    io::{AsyncBufReadExt, BufReader},
     runtime::Builder,
     task,
 };
+
+use async_std::io;
+use async_std::io::prelude::*;
 
 #[derive(Clone, Debug)]
 pub struct Job {
@@ -27,18 +28,9 @@ pub struct JobResult {
 async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     // parse the cli arguments
     let matches = App::new("aem-eye")
-        .version("0.1.3")
+        .version("0.1.4")
         .author("Blake Jacobs <krypt0mux@gmail.com>")
-        .about("really fas aem detection tool")
-        .arg(
-            Arg::with_name("hosts")
-                .short('u')
-                .long("hosts")
-                .takes_value(true)
-                .required(true)
-                .display_order(1)
-                .help("the hosts you would like to test"),
-        )
+        .about("really fast aem detection tool")
         .arg(
             Arg::with_name("rate")
                 .short('r')
@@ -106,27 +98,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         }
     };
 
-    let hosts_path = match matches.get_one::<String>("hosts").map(|s| s.to_string()) {
-        Some(hosts_path) => hosts_path,
-        None => "".to_string(),
-    };
-
-    let hosts_handle = match File::open(hosts_path).await {
-        Ok(hosts_handle) => hosts_handle,
-        Err(e) => {
-            println!("failed to open input file: {:?}", e);
-            exit(1);
-        }
-    };
-
-    // construct the hosts from a vector of strings
-    let mut hosts = vec![];
-    let hosts_buf = BufReader::new(hosts_handle);
-    let mut hosts_lines = hosts_buf.lines();
-    while let Ok(Some(host)) = hosts_lines.next_line().await {
-        hosts.push(host);
-    }
-
     let mut patterns = HashMap::new();
     patterns.insert(1, String::from(r#"href="\/content\/dam.*"#));
     patterns.insert(2, String::from(r#"href="\/etc.clientlibs.*"#));
@@ -141,7 +112,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     // job channels
     let (job_tx, job_rx) = spmc::channel::<Job>();
 
-    rt.spawn(async move { send_url(job_tx, hosts, patterns, rate).await });
+    rt.spawn(async move { send_url(job_tx, patterns, rate).await });
 
     // process the jobs
     let workers = FuturesUnordered::new();
@@ -162,7 +133,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 
 async fn send_url(
     mut tx: spmc::Sender<Job>,
-    ip_strs: Vec<String>,
     patterns: HashMap<i32, String>,
     rate: u32,
 ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
@@ -170,8 +140,11 @@ async fn send_url(
     let lim = RateLimiter::direct(Quota::per_second(std::num::NonZeroU32::new(rate).unwrap()));
 
     // send the jobs
-    for host in ip_strs.iter() {
+    let stdin = io::BufReader::new(io::stdin());
+    let mut lines = stdin.lines();
+    while let Some(line) = lines.next().await {
         lim.until_ready().await;
+        let host = line.unwrap();
         let msg = Job {
             ip_str: Some(host.to_string().clone()),
             patterns: Some(patterns.clone()),
@@ -228,14 +201,10 @@ pub async fn run_detector(rx: spmc::Receiver<Job>, timeout: usize) {
                 }
             };
 
-            let mut result = String::from("");
             let re = Regex::new(&pattern.1).unwrap();
-            for cap in re.captures_iter(&body) {
-                if cap.len() > 0 {
-                    result.push_str(&job_host);
-                    println!("{}", job_host);
-                    break;
-                }
+            if re.is_match(&body) {
+                println!("{}", job_host);
+                continue;
             }
         }
     }
