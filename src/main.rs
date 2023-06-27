@@ -28,7 +28,7 @@ pub struct JobResult {
 async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     // parse the cli arguments
     let matches = App::new("aem-eye")
-        .version("0.1.7")
+        .version("0.1.8")
         .author("Blake Jacobs <krypt0mux@gmail.com>")
         .about("really fast aem detection tool")
         .arg(
@@ -144,7 +144,19 @@ async fn send_url(
     let mut lines = stdin.lines();
     while let Some(line) = lines.next().await {
         lim.until_ready().await;
-        let host = line.unwrap();
+        let host_line = line.unwrap();
+        let mut host = String::from("");
+        let url = match reqwest::Url::parse(&host_line) {
+            Ok(url) => url,
+            Err(_) => continue,
+        };
+        host.push_str(url.scheme());
+        host.push_str("://");
+        let host_str = match url.host_str() {
+            Some(host_str) => host_str,
+            None => continue,
+        };
+        host.push_str(host_str);
         let msg = Job {
             ip_str: Some(host.to_string().clone()),
             patterns: Some(patterns.clone()),
