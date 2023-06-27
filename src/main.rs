@@ -5,10 +5,7 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use governor::{Quota, RateLimiter};
 use regex::Regex;
 use reqwest::redirect;
-use tokio::{
-    runtime::Builder,
-    task,
-};
+use tokio::{runtime::Builder, task};
 
 use async_std::io;
 use async_std::io::prelude::*;
